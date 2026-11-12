@@ -1,0 +1,1271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>霓虹割草场</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&display=swap">
+<style>
+/* 布局：全屏 Canvas 作底，HUD 顶部一条信息带，界面层居中浮层 */
+:root{
+  --bg:#080a12;          /* 深夜蓝黑 */
+  --panel:#111526cc;     /* 半透明面板 */
+  --line:#2a3150;        /* 偏紫的中性描边 */
+  --ink:#e9edf8;         /* 主文字 */
+  --ink-dim:#8d96b5;     /* 次级文字 */
+  --p1:#36e0ff;          /* 玩家1 青 */
+  --p2:#ffa63d;          /* 玩家2 琥珀 */
+  --danger:#ff4d6d;      /* 血量 / 怪物 */
+  --accent:#a177ff;      /* 升级紫 */
+  --font-ui:'Chakra Petch','Noto Sans SC','Microsoft YaHei',system-ui,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  background:var(--bg);
+  color:var(--ink);
+  font-family:var(--font-ui);
+  overflow:hidden;
+  -webkit-user-select:none;user-select:none;
+}
+canvas{display:block;position:fixed;inset:0;width:100%;height:100%}
+
+/* ---------- HUD ---------- */
+#hud{
+  position:fixed;left:0;right:0;top:0;z-index:5;
+  display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+  padding-top:calc(10px + env(safe-area-inset-top,0px));
+  padding-bottom:10px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  pointer-events:none;
+  background:linear-gradient(180deg,#080a12dd,#080a1200);
+}
+.players{display:flex;flex-direction:column;gap:8px;min-width:0}
+.pcard{
+  display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center;
+  padding:8px 12px;border:1px solid var(--line);border-radius:4px;
+  background:var(--panel);min-width:210px;
+}
+.pcard[data-dead="1"]{opacity:.45}
+.pname{font-weight:700;letter-spacing:.08em;font-size:12px}
+.pcard[data-who="1"] .pname{color:var(--p1)}
+.pcard[data-who="2"] .pname{color:var(--p2)}
+.pkeys{font-size:11px;color:var(--ink-dim);letter-spacing:.05em}
+.bar{grid-column:1/-1;height:7px;border-radius:99px;background:#1b2136;overflow:hidden}
+.bar>i{display:block;height:100%;width:100%;background:var(--danger);transition:width .12s linear}
+.pstat{grid-column:1/-1;font-size:11px;color:var(--ink-dim);font-variant-numeric:tabular-nums}
+
+.stats{
+  display:flex;gap:18px;align-items:flex-start;
+  padding:8px 14px;border:1px solid var(--line);border-radius:4px;background:var(--panel);
+}
+.stat{display:flex;flex-direction:column;align-items:flex-end;line-height:1.1}
+.stat b{font-size:22px;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.stat span{font-size:10px;letter-spacing:.14em;color:var(--ink-dim);text-transform:uppercase}
+#waveTimer{color:var(--accent)}
+
+/* ---------- 浮层通用 ---------- */
+.screen{
+  position:fixed;inset:0;z-index:10;display:none;
+  align-items:center;justify-content:center;
+  padding:24px max(16px,env(safe-area-inset-left,0px));
+  background:radial-gradient(ellipse at 50% 42%,rgba(20,28,56,.85),rgba(6,8,15,.92));
+  backdrop-filter:blur(3px);
+}
+.screen.on{display:flex}
+.box{width:min(760px,100%);max-height:100%;overflow:auto;text-align:center}
+.eyebrow{font-size:11px;letter-spacing:.42em;color:var(--ink-dim);text-transform:uppercase;margin:0 0 14px}
+h1{
+  font-size:clamp(34px,8vw,66px);margin:0 0 6px;letter-spacing:.06em;text-wrap:balance;
+  text-shadow:0 0 26px #36e0ff55;
+}
+h1 em{font-style:normal;color:var(--p1)}
+.sub{color:var(--ink-dim);margin:0 0 26px;font-size:14px;line-height:1.7}
+kbd{
+  display:inline-block;min-width:22px;padding:2px 6px;margin:0 2px;
+  border:1px solid var(--line);border-bottom-width:2px;border-radius:3px;
+  background:#141a2e;color:var(--ink);font:inherit;font-size:12px;
+}
+.modes{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-bottom:22px}
+.mode{
+  pointer-events:auto;cursor:pointer;width:210px;text-align:left;
+  padding:16px 18px;border:1px solid var(--line);border-radius:5px;
+  background:#0e1322;color:var(--ink);font:inherit;
+  transition:border-color .15s,transform .15s,box-shadow .15s;
+}
+.mode:hover,.mode:focus-visible{border-color:var(--p1);transform:translateY(-2px);box-shadow:0 0 0 1px #36e0ff44,0 10px 30px #000a;outline:none}
+.mode b{display:block;font-size:17px;letter-spacing:.06em;margin-bottom:4px}
+.mode span{font-size:12px;color:var(--ink-dim);line-height:1.6}
+.hint{font-size:12px;color:var(--ink-dim);letter-spacing:.06em}
+
+/* ---------- 升级三选一 ---------- */
+#upgrade .box{width:min(880px,100%)}
+.cards{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin:8px 0 18px}
+.card{
+  pointer-events:auto;cursor:pointer;width:240px;min-height:176px;
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  padding:20px 16px;border:1px solid var(--line);border-radius:6px;
+  background:linear-gradient(180deg,#131935,#0d1120);color:var(--ink);font:inherit;text-align:center;
+  transition:border-color .15s,transform .15s,box-shadow .15s;
+}
+.card:hover,.card:focus-visible{border-color:var(--accent);transform:translateY(-3px);box-shadow:0 0 0 1px #a177ff55,0 12px 34px #000b;outline:none}
+.card .ico{width:46px;height:46px;flex:none}
+.card b{font-size:17px;letter-spacing:.05em}
+.card p{margin:0;font-size:12.5px;color:var(--ink-dim);line-height:1.65}
+.card .num{font-size:11px;letter-spacing:.14em;color:var(--accent)}
+.pick{font-size:12px;color:var(--ink-dim);letter-spacing:.1em}
+
+/* ---------- 结算 ---------- */
+.tally{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;
+  background:var(--line);border:1px solid var(--line);border-radius:5px;overflow:hidden;margin:0 0 24px;
+}
+.tally div{background:#0d1120;padding:16px 10px}
+.tally b{display:block;font-size:26px;font-variant-numeric:tabular-nums}
+.tally span{font-size:10px;letter-spacing:.16em;color:var(--ink-dim);text-transform:uppercase}
+.btn{
+  pointer-events:auto;cursor:pointer;font:inherit;font-size:15px;letter-spacing:.1em;
+  padding:12px 30px;border-radius:4px;border:1px solid var(--p1);
+  background:#36e0ff14;color:var(--p1);transition:background .15s,transform .15s;
+}
+.btn:hover,.btn:focus-visible{background:#36e0ff28;transform:translateY(-1px);outline:none}
+
+#toast{
+  position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);
+  z-index:6;pointer-events:none;font-size:13px;letter-spacing:.1em;color:var(--ink-dim);
+}
+[hidden]{display:none!important}
+@media (max-width:560px){
+  .stats{gap:12px;padding:6px 10px}
+  .stat b{font-size:17px}
+  .pcard{min-width:150px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- HUD：左侧玩家血条，右侧波数/得分/击杀 -->
+<div id="hud" hidden>
+  <div class="players" id="players"></div>
+  <div class="stats">
+    <div class="stat"><b id="hWave">1</b><span>波次</span></div>
+    <div class="stat"><b id="hLeft">0</b><span>剩余</span></div>
+    <div class="stat"><b id="hScore">0</b><span>得分</span></div>
+    <div class="stat"><b id="hKill">0</b><span>击杀</span></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<!-- 主菜单 -->
+<section class="screen on" id="menu">
+  <div class="box">
+    <p class="eyebrow">Neon Mow · 霓虹割草场</p>
+    <h1>霓虹<em>割草</em>场</h1>
+    <p class="sub">角色自动锁定最近的敌人开火，你只管走位。<br>清空一波后从三张卡里挑一张，活到你挑不动为止。</p>
+    <div class="modes">
+      <button class="mode" id="btn1p"><b>单人</b><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移动，自动攻击</span></button>
+      <button class="mode" id="btn2p"><b>双人同屏</b><span>P1 <kbd>WASD</kbd>　P2 <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd></span></button>
+    </div>
+    <p class="hint">游戏中按 <kbd>R</kbd> 重开 · <kbd>P</kbd> 暂停 · 升级时按 <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 选卡</p>
+  </div>
+</section>
+
+<!-- 升级三选一 -->
+<section class="screen" id="upgrade">
+  <div class="box">
+    <p class="eyebrow" id="upWave">第 1 波 清空</p>
+    <h1 style="font-size:clamp(26px,5vw,40px);text-shadow:0 0 26px #a177ff55">选一张强化</h1>
+    <div class="cards" id="cards"></div>
+    <p class="pick">按 <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> 或点击卡片</p>
+  </div>
+</section>
+
+<!-- 结算 -->
+<section class="screen" id="over">
+  <div class="box">
+    <p class="eyebrow">Run Ended</p>
+    <h1 style="color:var(--danger);text-shadow:0 0 26px #ff4d6d55">全员阵亡</h1>
+    <div class="tally">
+      <div><b id="oWave">1</b><span>坚持波数</span></div>
+      <div><b id="oScore">0</b><span>总得分</span></div>
+      <div><b id="oKill">0</b><span>击杀数</span></div>
+      <div><b id="oTime">0:00</b><span>存活时间</span></div>
+    </div>
+    <button class="btn" id="btnAgain">再来一局（R）</button>
+  </div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* =========================================================================
+   霓虹割草场 —— 单文件 Three.js 俯视角割草
+   结构：音效 → 常量/工具 → 场景 → 玩家 → 怪物 → 子弹/飞刀 → 波次/升级 → 状态机/主循环
+   ========================================================================= */
+'use strict';
+
+/* ===================== 1. WebAudio 简易音效 ===================== */
+// 全部用振荡器合成，无任何外部音频文件。首次用户交互后才创建 AudioContext。
+const Sfx = (() => {
+  let ctx = null, master = null, muted = false;
+  function ensure(){
+    if (ctx) return ctx;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;                 // 浏览器不支持就静默降级
+    ctx = new AC();
+    master = ctx.createGain();
+    master.gain.value = 0.28;
+    master.connect(ctx.destination);
+    return ctx;
+  }
+  // 基础音：波形 / 起始频率 / 结束频率 / 时长 / 音量
+  function tone(type, f0, f1, dur, vol){
+    const c = ensure(); if (!c || muted) return;
+    const t = c.currentTime;
+    const osc = c.createOscillator(), g = c.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(f0, t);
+    if (f1 && f1 !== f0) osc.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g); g.connect(master);
+    osc.start(t); osc.stop(t + dur + 0.02);
+  }
+  // 噪声爆：怪物死亡 / 玩家受伤
+  function noise(dur, vol, freq){
+    const c = ensure(); if (!c || muted) return;
+    const t = c.currentTime, n = Math.floor(c.sampleRate * dur);
+    const buf = c.createBuffer(1, n, c.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    const src = c.createBufferSource(); src.buffer = buf;
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 1.2;
+    const g = c.createGain(); g.gain.value = vol;
+    src.connect(bp); bp.connect(g); g.connect(master);
+    src.start(t);
+  }
+  return {
+    resume(){ const c = ensure(); if (c && c.state === 'suspended') c.resume(); },
+    shoot(){ tone('square', 880, 420, 0.07, 0.10); },
+    blade(){ tone('triangle', 1400, 900, 0.05, 0.05); },
+    hit(){ tone('square', 320, 220, 0.04, 0.06); },
+    kill(){ noise(0.16, 0.22, 700); },
+    hurt(){ noise(0.26, 0.4, 220); tone('sawtooth', 200, 70, 0.22, 0.14); },
+    pick(){ tone('sine', 520, 1040, 0.16, 0.16); },
+    wave(){ tone('sine', 300, 760, 0.3, 0.14); setTimeout(() => tone('sine', 420, 980, 0.32, 0.12), 110); },
+    down(){ tone('sawtooth', 300, 50, 0.9, 0.2); },
+    ui(){ tone('sine', 700, 900, 0.05, 0.1); }
+  };
+})();
+
+/* ===================== 2. 常量与小工具 ===================== */
+const ARENA = 46;                 // 场地半径（圆形竞技场）
+const MAX_ENEMY = 700;            // InstancedMesh 实例上限
+const MAX_BULLET = 400;
+
+const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
+const rand  = (a, b) => a + Math.random() * (b - a);
+const randi = (a, b) => Math.floor(rand(a, b + 1));
+// 从数组里不重复地抽 n 个
+function sample(arr, n){
+  const pool = arr.slice(), out = [];
+  while (out.length < n && pool.length) out.push(pool.splice(randi(0, pool.length - 1), 1)[0]);
+  return out;
+}
+const fmtTime = s => Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0');
+const $ = id => document.getElementById(id);
+
+/* ===================== 3. 场景 / 相机 / 渲染器 ===================== */
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x080a12);
+scene.fog = new THREE.Fog(0x080a12, 60, 130);
+
+// 俯视角相机：固定俯角，跟随玩家中心平移
+const camera = new THREE.PerspectiveCamera(52, window.innerWidth / window.innerHeight, 0.5, 400);
+const CAM_OFF = new THREE.Vector3(0, 42, 30);   // 相机相对注视点的偏移
+const camLook = new THREE.Vector3(0, 0, 0);     // 当前注视点（平滑跟随）
+let camShake = 0;                               // 受击抖动强度
+
+// 光照：一盏主平行光 + 环境光 + 两侧补色点光，营造霓虹感
+scene.add(new THREE.AmbientLight(0x3a4473, 1.1));
+const sun = new THREE.DirectionalLight(0xdfe8ff, 1.0);
+sun.position.set(18, 40, 16);
+scene.add(sun);
+const fillA = new THREE.PointLight(0x36e0ff, 1.6, 140); fillA.position.set(-30, 18, -20); scene.add(fillA);
+const fillB = new THREE.PointLight(0xa177ff, 1.4, 140); fillB.position.set(30, 18, 24);  scene.add(fillB);
+
+// —— 地面：深色圆盘 + 网格线 + 外圈发光环 ——
+const ground = new THREE.Mesh(
+  new THREE.CircleGeometry(ARENA + 2, 72),
+  new THREE.MeshStandardMaterial({ color: 0x121829, roughness: 0.95, metalness: 0.05 })
+);
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+
+// 方形网格内接于圆形地面，避免四角悬空
+const grid = new THREE.GridHelper(66, 33, 0x2a3150, 0x1b2136);
+grid.position.y = 0.02;
+scene.add(grid);
+
+const ring = new THREE.Mesh(
+  new THREE.RingGeometry(ARENA, ARENA + 0.6, 96),
+  new THREE.MeshBasicMaterial({ color: 0x36e0ff, transparent: true, opacity: 0.55, side: THREE.DoubleSide })
+);
+ring.rotation.x = -Math.PI / 2;
+ring.position.y = 0.05;
+scene.add(ring);
+
+// 场地外侧的装饰柱，给俯视角一点纵深参考
+const pillarGeo = new THREE.CylinderGeometry(0.5, 0.7, 7, 6);
+const pillarMat = new THREE.MeshStandardMaterial({ color: 0x1d2440, roughness: 0.6, emissive: 0x0e1730 });
+for (let i = 0; i < 16; i++){
+  const a = (i / 16) * Math.PI * 2;
+  const p = new THREE.Mesh(pillarGeo, pillarMat);
+  p.position.set(Math.cos(a) * (ARENA + 6), 3.5, Math.sin(a) * (ARENA + 6));
+  scene.add(p);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// 复用的临时对象，避免每帧 new（GC 压力）
+const _m4 = new THREE.Matrix4();
+const _q  = new THREE.Quaternion();
+const _v3 = new THREE.Vector3();
+const _sc = new THREE.Vector3(1, 1, 1);
+const _up = new THREE.Vector3(0, 1, 0);
+
+/* ===================== 4. 玩家 ===================== */
+// 键位表：两套互不冲突的布局
+const KEYMAP = [
+  { up:'KeyW',    down:'KeyS',     left:'KeyA',     right:'KeyD'      },
+  { up:'ArrowUp', down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight'}
+];
+const keys = Object.create(null);
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  // 方向键会滚动页面，游戏中屏蔽掉
+  if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
+  onKey(e.code);
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+// 用基础几何体拼一个小机甲：底座 + 躯干 + 炮管 + 头顶指示灯
+function buildAvatar(color){
+  const g = new THREE.Group();
+  const matBody = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.5, emissive: new THREE.Color(color).multiplyScalar(0.25) });
+  const matDark = new THREE.MeshStandardMaterial({ color: 0x1a2138, roughness: 0.7, metalness: 0.3 });
+
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 1.0, 0.4, 12), matDark);
+  base.position.y = 0.2; g.add(base);
+
+  // 躯干：r128 没有 CapsuleGeometry，这里做兼容判断
+  const bodyGeo = typeof THREE.CapsuleGeometry === 'function'
+    ? new THREE.CapsuleGeometry(0.55, 0.9, 4, 12)
+    : new THREE.CylinderGeometry(0.55, 0.6, 1.6, 12);
+  const body = new THREE.Mesh(bodyGeo, matBody);
+  body.position.y = 1.15; g.add(body);
+
+  const head = new THREE.Mesh(new THREE.OctahedronGeometry(0.42), matBody);
+  head.position.y = 2.1; g.add(head);
+
+  // 炮管朝 +Z，整体 group 用 lookAt 对准目标
+  const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 1.5), matDark);
+  barrel.position.set(0.55, 1.25, 0.75); g.add(barrel);
+  const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 8), new THREE.MeshBasicMaterial({ color }));
+  muzzle.position.set(0.55, 1.25, 1.55); g.add(muzzle);
+
+  // 脚下光环，表明归属
+  const halo = new THREE.Mesh(
+    new THREE.RingGeometry(1.15, 1.45, 28),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6, side: THREE.DoubleSide })
+  );
+  halo.rotation.x = -Math.PI / 2; halo.position.y = 0.06; g.add(halo);
+
+  g.userData.muzzle = muzzle;
+  return g;
+}
+
+class Player {
+  constructor(index, color){
+    this.index = index;                 // 0 / 1
+    this.color = color;
+    this.keys  = KEYMAP[index];
+    this.mesh  = buildAvatar(color);
+    this.bladeGroup = new THREE.Group(); // 环绕飞刀挂在玩家身上（不随朝向旋转，单独管理）
+    scene.add(this.mesh, this.bladeGroup);
+    this.blades = [];
+    this.reset(index === 0 ? -4 : 4);
+  }
+  // 重置为初始属性（开局 / R 重来都走这里）
+  reset(x){
+    this.pos    = new THREE.Vector3(x, 0, 6);
+    this.vel    = new THREE.Vector3();
+    this.hpMax  = 100; this.hp = 100;
+    this.speed  = 13;        // 单位/秒
+    this.dmg    = 10;        // 单发伤害
+    this.rate   = 2.2;       // 每秒射击次数
+    this.range  = 24;        // 锁定半径
+    this.pierce = 0;         // 额外穿透次数
+    this.multi  = 1;         // 同时射出的子弹数
+    this.regen  = 0;         // 每秒回血
+    this.magnet = 1;         // 预留：拾取范围倍率
+    this.bladeCount = 0;     // 环绕飞刀数量
+    this.bladeDmg   = 12;
+    this.bladeSpin  = 2.4;   // 弧度/秒
+    this.bladeR     = 3.4;
+    this.cool   = 0;         // 射击冷却计时
+    this.iframe = 0;         // 受击无敌帧
+    this.dead   = false;
+    this.bladeAngle = 0;
+    this.kills  = 0;
+    this.mesh.visible = true;
+    this.mesh.position.copy(this.pos);
+    this.syncBlades();
+  }
+  // 根据 bladeCount 重建飞刀网格
+  syncBlades(){
+    while (this.blades.length > this.bladeCount){
+      const b = this.blades.pop();
+      this.bladeGroup.remove(b);
+      b.geometry.dispose(); b.material.dispose();
+    }
+    while (this.blades.length < this.bladeCount){
+      const m = new THREE.Mesh(
+        new THREE.TetrahedronGeometry(0.55),
+        new THREE.MeshStandardMaterial({ color: this.color, emissive: this.color, emissiveIntensity: 0.7, roughness: 0.3 })
+      );
+      this.bladeGroup.add(m);
+      this.blades.push(m);
+    }
+  }
+  takeDamage(d){
+    if (this.dead || this.iframe > 0) return;
+    this.hp -= d;
+    this.iframe = 0.55;
+    camShake = Math.min(1.2, camShake + 0.5);
+    Sfx.hurt();
+    if (this.hp <= 0){
+      this.hp = 0; this.dead = true;
+      this.mesh.visible = false;
+      this.bladeCount = 0; this.syncBlades();
+      Sfx.down();
+    }
+    updateHUD();
+  }
+  update(dt){
+    if (this.dead) return;
+    // —— 输入：八方向移动，斜向归一化 ——
+    let ix = 0, iz = 0;
+    if (keys[this.keys.left])  ix -= 1;
+    if (keys[this.keys.right]) ix += 1;
+    if (keys[this.keys.up])    iz -= 1;
+    if (keys[this.keys.down])  iz += 1;
+    const len = Math.hypot(ix, iz);
+    if (len > 0){ ix /= len; iz /= len; }
+    this.pos.x += ix * this.speed * dt;
+    this.pos.z += iz * this.speed * dt;
+
+    // 限制在圆形场地内
+    const d = Math.hypot(this.pos.x, this.pos.z);
+    if (d > ARENA - 1){
+      this.pos.x = this.pos.x / d * (ARENA - 1);
+      this.pos.z = this.pos.z / d * (ARENA - 1);
+    }
+    this.mesh.position.copy(this.pos);
+
+    // —— 自动锁定最近的怪物并射击 ——
+    const target = enemies.nearest(this.pos, this.range);
+    if (target){
+      _v3.set(target.x, 0, target.z);
+      this.mesh.lookAt(_v3.x, this.mesh.position.y, _v3.z);
+      this.cool -= dt;
+      if (this.cool <= 0){
+        this.cool = 1 / this.rate;
+        this.fire(target);
+      }
+    } else if (len > 0){
+      // 没目标时朝移动方向
+      this.mesh.lookAt(this.pos.x + ix, this.mesh.position.y, this.pos.z + iz);
+    }
+
+    // —— 环绕飞刀 ——
+    this.bladeAngle += this.bladeSpin * dt;
+    this.bladeGroup.position.set(this.pos.x, 1.0, this.pos.z);
+    for (let i = 0; i < this.blades.length; i++){
+      const a = this.bladeAngle + (i / this.blades.length) * Math.PI * 2;
+      const b = this.blades[i];
+      b.position.set(Math.cos(a) * this.bladeR, 0, Math.sin(a) * this.bladeR);
+      b.rotation.y += dt * 6; b.rotation.x += dt * 4;
+      // 飞刀碰撞判定（世界坐标）
+      enemies.damageAt(this.bladeGroup.position.x + b.position.x,
+                       this.bladeGroup.position.z + b.position.z,
+                       1.1, this.bladeDmg * dt * 4, this);
+    }
+
+    // 回血与无敌帧
+    if (this.regen > 0 && this.hp < this.hpMax){
+      this.hp = Math.min(this.hpMax, this.hp + this.regen * dt);
+    }
+    if (this.iframe > 0) this.iframe -= dt;
+    // 受伤闪烁
+    this.mesh.visible = this.iframe > 0 ? (Math.floor(this.iframe * 20) % 2 === 0) : true;
+  }
+  fire(target){
+    const origin = this.mesh.userData && this.mesh.userData.muzzle
+      ? this.mesh.userData.muzzle.getWorldPosition(new THREE.Vector3())
+      : this.pos.clone().setY(1.2);
+    const baseAng = Math.atan2(target.x - origin.x, target.z - origin.z);
+    const spread = 0.13;
+    for (let i = 0; i < this.multi; i++){
+      const off = (i - (this.multi - 1) / 2) * spread;
+      bullets.spawn(origin.x, origin.z, baseAng + off, this);
+    }
+    Sfx.shoot();
+  }
+}
+
+/* ===================== 5. 怪物系统（InstancedMesh） ===================== */
+// 三种怪物共用一套实例池，各自一个 InstancedMesh（几何体不同但都原生生成）。
+// 数据用扁平数组存，避免大量对象分配；死亡的实例缩放为 0 隐藏，索引回收复用。
+const ENEMY_KINDS = [
+  { name: '游荡者', geo: () => new THREE.IcosahedronGeometry(0.8, 0),            color: 0xff4d6d, hp: 24, speed: 5.2, dmg: 8,  score: 10, scale: 1.0 },
+  { name: '冲锋者', geo: () => new THREE.ConeGeometry(0.7, 1.8, 6),              color: 0xffc14d, hp: 16, speed: 8.6, dmg: 6,  score: 14, scale: 0.9 },
+  { name: '重装者', geo: () => new THREE.DodecahedronGeometry(1.25, 0),          color: 0xa177ff, hp: 72, speed: 3.4, dmg: 16, score: 26, scale: 1.4 }
+];
+
+const enemies = (() => {
+  const meshes = [];           // 每种怪物一个 InstancedMesh
+  ENEMY_KINDS.forEach(k => {
+    const mat = new THREE.MeshStandardMaterial({
+      color: k.color, roughness: 0.4, metalness: 0.35,
+      emissive: new THREE.Color(k.color).multiplyScalar(0.3)
+    });
+    const im = new THREE.InstancedMesh(k.geo(), mat, MAX_ENEMY);
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    im.count = MAX_ENEMY;
+    im.frustumCulled = false;
+    scene.add(im);
+    meshes.push(im);
+  });
+
+  // 扁平数据
+  const alive = new Uint8Array(MAX_ENEMY);
+  const kind  = new Uint8Array(MAX_ENEMY);
+  const px    = new Float32Array(MAX_ENEMY);
+  const pz    = new Float32Array(MAX_ENEMY);
+  const hp    = new Float32Array(MAX_ENEMY);
+  const hpMax = new Float32Array(MAX_ENEMY);
+  const spd   = new Float32Array(MAX_ENEMY);
+  const dmg   = new Float32Array(MAX_ENEMY);
+  const scr   = new Float32Array(MAX_ENEMY);
+  const rad   = new Float32Array(MAX_ENEMY);
+  const spin  = new Float32Array(MAX_ENEMY);
+  const flash = new Float32Array(MAX_ENEMY);   // 受击白闪计时
+  const atkcd = new Float32Array(MAX_ENEMY);   // 攻击冷却
+  const born  = new Float32Array(MAX_ENEMY);   // 出生弹出动画
+  let count = 0;                               // 存活数量
+  let cursor = 0;                              // 分配游标
+
+  function spawn(kindIdx, x, z, hpMul, spdMul, dmgMul){
+    if (count >= MAX_ENEMY) return -1;
+    // 找一个空位
+    let i = -1;
+    for (let n = 0; n < MAX_ENEMY; n++){
+      const j = (cursor + n) % MAX_ENEMY;
+      if (!alive[j]){ i = j; cursor = (j + 1) % MAX_ENEMY; break; }
+    }
+    if (i < 0) return -1;
+    const k = ENEMY_KINDS[kindIdx];
+    alive[i] = 1; kind[i] = kindIdx;
+    px[i] = x; pz[i] = z;
+    hpMax[i] = hp[i] = k.hp * hpMul;
+    spd[i] = k.speed * spdMul * rand(0.9, 1.1);
+    dmg[i] = k.dmg * dmgMul;
+    scr[i] = k.score;
+    rad[i] = k.scale * 0.95;
+    spin[i] = rand(-2, 2);
+    flash[i] = 0; atkcd[i] = 0; born[i] = 0.35;
+    count++;
+    return i;
+  }
+
+  // 找最近的活着的怪物（返回 {i,x,z} 或 null）
+  const _near = { i: -1, x: 0, z: 0 };
+  function nearest(p, maxDist){
+    let best = -1, bd = maxDist * maxDist;
+    for (let i = 0; i < MAX_ENEMY; i++){
+      if (!alive[i]) continue;
+      const dx = px[i] - p.x, dz = pz[i] - p.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bd){ bd = d2; best = i; }
+    }
+    if (best < 0) return null;
+    _near.i = best; _near.x = px[best]; _near.z = pz[best];
+    return _near;
+  }
+
+  // 对某点半径内的怪物造成伤害，返回是否命中过
+  function damageAt(x, z, r, amount, owner){
+    let hitAny = false;
+    const r2 = r * r;
+    for (let i = 0; i < MAX_ENEMY; i++){
+      if (!alive[i]) continue;
+      const dx = px[i] - x, dz = pz[i] - z;
+      const rr = r + rad[i];
+      if (dx * dx + dz * dz <= Math.max(r2, rr * rr)){
+        hurt(i, amount, owner);
+        hitAny = true;
+      }
+    }
+    return hitAny;
+  }
+
+  function hurt(i, amount, owner){
+    hp[i] -= amount;
+    flash[i] = 0.12;
+    if (hp[i] <= 0) kill(i, owner);
+  }
+
+  function kill(i, owner){
+    if (!alive[i]) return;
+    alive[i] = 0; count--;
+    game.score += Math.round(scr[i] * (1 + game.wave * 0.08));
+    game.kills++;
+    if (owner) owner.kills++;
+    fx.burst(px[i], pz[i], ENEMY_KINDS[kind[i]].color);
+    Sfx.kill();
+    // 立刻把矩阵缩放到 0，避免残影
+    _m4.makeScale(0, 0, 0); _m4.setPosition(0, -50, 0);
+    meshes[kind[i]].setMatrixAt(i, _m4);
+    updateHUD();
+  }
+
+  function clear(){
+    for (let i = 0; i < MAX_ENEMY; i++) alive[i] = 0;
+    count = 0; cursor = 0;
+    writeMatrices();
+  }
+
+  // 把所有实例矩阵写回 GPU（清场时用，正常帧由 update 负责）
+  function writeMatrices(){
+    for (let i = 0; i < MAX_ENEMY; i++){
+      for (let m = 0; m < meshes.length; m++){
+        if (alive[i] && kind[i] === m) continue;
+        _m4.makeScale(0, 0, 0); _m4.setPosition(0, -50, 0);
+        meshes[m].setMatrixAt(i, _m4);
+      }
+    }
+    meshes.forEach(m => { m.instanceMatrix.needsUpdate = true; });
+  }
+
+  function update(dt, players){
+    const t = performance.now() * 0.001;
+    for (let i = 0; i < MAX_ENEMY; i++){
+      if (!alive[i]){ continue; }
+
+      // —— 选最近的活着的玩家作为追击目标 ——
+      let tp = null, td = Infinity;
+      for (const p of players){
+        if (p.dead) continue;
+        const d = (p.pos.x - px[i]) ** 2 + (p.pos.z - pz[i]) ** 2;
+        if (d < td){ td = d; tp = p; }
+      }
+      if (tp){
+        const dist = Math.sqrt(td) || 1;
+        const ux = (tp.pos.x - px[i]) / dist, uz = (tp.pos.z - pz[i]) / dist;
+        px[i] += ux * spd[i] * dt;
+        pz[i] += uz * spd[i] * dt;
+
+        // 接触伤害
+        atkcd[i] -= dt;
+        if (dist < rad[i] + 1.0 && atkcd[i] <= 0){
+          atkcd[i] = 0.7;
+          tp.takeDamage(dmg[i]);
+        }
+      }
+      if (flash[i] > 0) flash[i] -= dt;
+      if (born[i] > 0)  born[i]  -= dt;
+    }
+
+    // —— 怪物之间简单互斥，避免完全重叠（抽样检测，控制开销）——
+    for (let a = 0; a < MAX_ENEMY; a++){
+      if (!alive[a]) continue;
+      for (let n = 1; n <= 3; n++){
+        const b = (a + n * 7) % MAX_ENEMY;
+        if (b === a || !alive[b]) continue;
+        const dx = px[b] - px[a], dz = pz[b] - pz[a];
+        const need = rad[a] + rad[b];
+        const d2 = dx * dx + dz * dz;
+        if (d2 > 0.0001 && d2 < need * need){
+          const d = Math.sqrt(d2), push = (need - d) * 0.5;
+          const ux = dx / d, uz = dz / d;
+          px[a] -= ux * push; pz[a] -= uz * push;
+          px[b] += ux * push; pz[b] += uz * push;
+        }
+      }
+    }
+
+    // —— 写实例矩阵 ——
+    for (let m = 0; m < meshes.length; m++){
+      const im = meshes[m];
+      for (let i = 0; i < MAX_ENEMY; i++){
+        if (alive[i] && kind[i] === m){
+          const k = ENEMY_KINDS[m];
+          let s = k.scale * (1 - Math.max(0, born[i]) * 1.6);
+          if (s < 0.05) s = 0.05;
+          if (flash[i] > 0) s *= 1.18;              // 受击微微膨胀代替变色
+          const bob = Math.sin(t * 3 + i) * 0.12;
+          _q.setFromAxisAngle(_up, t * spin[i]);
+          _sc.set(s, s, s);
+          _v3.set(px[i], k.scale + bob, pz[i]);
+          _m4.compose(_v3, _q, _sc);
+        } else {
+          _m4.makeScale(0, 0, 0);
+          _m4.setPosition(0, -50, 0);
+        }
+        im.setMatrixAt(i, _m4);
+      }
+      im.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  return {
+    spawn, nearest, damageAt, hurt, kill, clear, update,
+    get count(){ return count; },
+    isAlive: i => !!alive[i],
+    posX: i => px[i], posZ: i => pz[i], radius: i => rad[i]
+  };
+})();
+
+/* ===================== 6. 子弹（InstancedMesh 池） ===================== */
+const bullets = (() => {
+  const geo = new THREE.SphereGeometry(0.26, 8, 8);
+  // 两个玩家各一种颜色，所以开两个实例网格
+  const COLORS = [0x36e0ff, 0xffa63d];
+  const meshes = COLORS.map(c => {
+    const im = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ color: c }), MAX_BULLET);
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    im.frustumCulled = false;
+    scene.add(im);
+    return im;
+  });
+
+  const alive = new Uint8Array(MAX_BULLET);
+  const owner = new Uint8Array(MAX_BULLET);     // 0/1 玩家序号
+  const bx = new Float32Array(MAX_BULLET), bz = new Float32Array(MAX_BULLET);
+  const vx = new Float32Array(MAX_BULLET), vz = new Float32Array(MAX_BULLET);
+  const dmgA = new Float32Array(MAX_BULLET);
+  const pierceA = new Int8Array(MAX_BULLET);
+  const life = new Float32Array(MAX_BULLET);
+  let cursor = 0;
+  const SPEED = 42;
+
+  function spawn(x, z, ang, player){
+    let i = -1;
+    for (let n = 0; n < MAX_BULLET; n++){
+      const j = (cursor + n) % MAX_BULLET;
+      if (!alive[j]){ i = j; cursor = (j + 1) % MAX_BULLET; break; }
+    }
+    if (i < 0) return;
+    alive[i] = 1; owner[i] = player.index;
+    bx[i] = x; bz[i] = z;
+    vx[i] = Math.sin(ang) * SPEED; vz[i] = Math.cos(ang) * SPEED;
+    dmgA[i] = player.dmg;
+    pierceA[i] = player.pierce;
+    life[i] = 1.6;
+  }
+
+  function update(dt){
+    for (let i = 0; i < MAX_BULLET; i++){
+      if (!alive[i]) continue;
+      bx[i] += vx[i] * dt; bz[i] += vz[i] * dt;
+      life[i] -= dt;
+      if (life[i] <= 0 || Math.hypot(bx[i], bz[i]) > ARENA + 4){ alive[i] = 0; continue; }
+      // 命中检测：遍历怪物，碰到第一个就结算（穿透则继续飞）
+      for (let e = 0; e < MAX_ENEMY; e++){
+        if (!enemies.isAlive(e)) continue;
+        const dx = enemies.posX(e) - bx[i], dz = enemies.posZ(e) - bz[i];
+        const r = enemies.radius(e) + 0.3;
+        if (dx * dx + dz * dz <= r * r){
+          enemies.hurt(e, dmgA[i], players[owner[i]]);
+          Sfx.hit();
+          if (pierceA[i] > 0){ pierceA[i]--; }
+          else { alive[i] = 0; }
+          break;
+        }
+      }
+    }
+    // 写矩阵
+    for (let m = 0; m < meshes.length; m++){
+      const im = meshes[m];
+      for (let i = 0; i < MAX_BULLET; i++){
+        if (alive[i] && owner[i] === m){
+          _m4.makeScale(1, 1, 1);
+          _m4.setPosition(bx[i], 1.2, bz[i]);
+        } else {
+          _m4.makeScale(0, 0, 0);
+          _m4.setPosition(0, -50, 0);
+        }
+        im.setMatrixAt(i, _m4);
+      }
+      im.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  function clear(){
+    for (let i = 0; i < MAX_BULLET; i++) alive[i] = 0;
+    update(0);
+  }
+
+  return { spawn, update, clear };
+})();
+
+/* ===================== 6b. 死亡碎片特效 ===================== */
+const fx = (() => {
+  const MAX = 240;
+  const geo = new THREE.TetrahedronGeometry(0.3);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+  const im = new THREE.InstancedMesh(geo, mat, MAX);
+  im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  im.frustumCulled = false;
+  scene.add(im);
+
+  const life = new Float32Array(MAX);
+  const x = new Float32Array(MAX), y = new Float32Array(MAX), z = new Float32Array(MAX);
+  const dx = new Float32Array(MAX), dy = new Float32Array(MAX), dz = new Float32Array(MAX);
+  let cursor = 0;
+  const col = new THREE.Color();
+
+  function burst(ex, ez, color){
+    col.set(color);
+    for (let n = 0; n < 6; n++){
+      const i = cursor; cursor = (cursor + 1) % MAX;
+      life[i] = 0.5;
+      x[i] = ex; y[i] = 1; z[i] = ez;
+      const a = Math.random() * Math.PI * 2, s = rand(4, 11);
+      dx[i] = Math.cos(a) * s; dy[i] = rand(3, 9); dz[i] = Math.sin(a) * s;
+      im.setColorAt(i, col);          // 按怪物颜色染色（instanceColor 由 three 自动创建）
+    }
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+  }
+
+  function update(dt){
+    for (let i = 0; i < MAX; i++){
+      if (life[i] <= 0){
+        _m4.makeScale(0, 0, 0); _m4.setPosition(0, -50, 0);
+      } else {
+        life[i] -= dt;
+        dy[i] -= 26 * dt;
+        x[i] += dx[i] * dt; y[i] += dy[i] * dt; z[i] += dz[i] * dt;
+        if (y[i] < 0.2){ y[i] = 0.2; dy[i] *= -0.4; dx[i] *= 0.7; dz[i] *= 0.7; }
+        const s = Math.max(0.01, life[i] * 1.6);
+        _m4.makeScale(s, s, s);
+        _m4.setPosition(x[i], y[i], z[i]);
+      }
+      im.setMatrixAt(i, _m4);
+    }
+    im.instanceMatrix.needsUpdate = true;
+  }
+
+  function clear(){ for (let i = 0; i < MAX; i++) life[i] = 0; update(0); }
+  return { burst, update, clear };
+})();
+
+/* ===================== 7. 波次与升级 ===================== */
+// 波次强度曲线：数量线性涨，血量/速度/伤害随波次缓慢指数涨
+function waveConfig(w){
+  return {
+    total: Math.round(8 + w * 3.4 + Math.pow(w, 1.35)),
+    hpMul:  1 + (w - 1) * 0.28 + Math.pow(w, 1.5) * 0.012,
+    spdMul: Math.min(2.0, 1 + (w - 1) * 0.035),
+    dmgMul: 1 + (w - 1) * 0.16,
+    // 随波次解锁更硬的怪：第 2 波出冲锋者，第 4 波出重装者
+    weights: [Math.max(2, 10 - w * 0.4), w >= 2 ? Math.min(8, 1 + w * 0.6) : 0, w >= 4 ? Math.min(6, (w - 3) * 0.8) : 0],
+    interval: Math.max(0.12, 0.62 - w * 0.03)   // 出怪间隔
+  };
+}
+
+// 在场地边缘随机位置刷怪
+function spawnEdge(cfg){
+  const wsum = cfg.weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * wsum, kindIdx = 0;
+  for (let i = 0; i < cfg.weights.length; i++){
+    r -= cfg.weights[i];
+    if (r <= 0){ kindIdx = i; break; }
+  }
+  const a = Math.random() * Math.PI * 2;
+  const d = ARENA - rand(1, 4);
+  enemies.spawn(kindIdx, Math.cos(a) * d, Math.sin(a) * d, cfg.hpMul, cfg.spdMul, cfg.dmgMul);
+}
+
+/* ---------- 升级卡池 ---------- */
+// 每张卡：id / 名称 / 描述（动态） / SVG 图标 / 应用函数 / 可重复次数
+function svg(paths, color){
+  return '<svg class="ico" viewBox="0 0 48 48" fill="none" stroke="' + color + '" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
+}
+const UPGRADES = [
+  {
+    id: 'dmg', name: '强化弹头', max: 99,
+    desc: () => '所有子弹伤害 +25%',
+    icon: c => svg('<path d="M24 6l6 12-6 6-6-6z"/><path d="M24 24v18"/><path d="M18 36h12"/>', c),
+    apply: p => { p.dmg *= 1.25; }
+  },
+  {
+    id: 'rate', name: '超频枪机', max: 99,
+    desc: () => '攻击速度 +22%',
+    icon: c => svg('<circle cx="24" cy="24" r="14"/><path d="M24 15v9l6 4"/><path d="M38 10l4-4"/>', c),
+    apply: p => { p.rate *= 1.22; }
+  },
+  {
+    id: 'speed', name: '推进背包', max: 99,
+    desc: () => '移动速度 +16%',
+    icon: c => svg('<path d="M24 6c6 6 9 13 9 20l-9 7-9-7c0-7 3-14 9-20z"/><path d="M18 34l-4 8 10-4 10 4-4-8"/>', c),
+    apply: p => { p.speed *= 1.16; }
+  },
+  {
+    id: 'blade', name: '环绕飞刀', max: 8,
+    desc: p => p.bladeCount === 0 ? '召出 2 把绕身飞刀，持续切割' : '飞刀数量 +1',
+    icon: c => svg('<circle cx="24" cy="24" r="4"/><circle cx="24" cy="24" r="14" stroke-dasharray="4 5"/><path d="M24 6l4 5h-8z"/><path d="M38 24l-5 4v-8z"/>', c),
+    apply: p => { p.bladeCount += (p.bladeCount === 0 ? 2 : 1); p.syncBlades(); }
+  },
+  {
+    id: 'bladeSpin', name: '离心加速', max: 6,
+    desc: () => '飞刀转速 +35%、半径 +0.5',
+    icon: c => svg('<path d="M12 24a12 12 0 1 1 6 10"/><path d="M12 14v10h10"/><circle cx="24" cy="24" r="3"/>', c),
+    apply: p => { p.bladeSpin *= 1.35; p.bladeR += 0.5; p.bladeDmg *= 1.15; },
+    need: p => p.bladeCount > 0           // 没飞刀时不出这张
+  },
+  {
+    id: 'multi', name: '分裂枪口', max: 4,
+    desc: () => '每次射击多一发子弹',
+    icon: c => svg('<path d="M10 24h10"/><path d="M20 24l14-9"/><path d="M20 24l14 9"/><path d="M20 24h14"/>', c),
+    apply: p => { p.multi += 1; }
+  },
+  {
+    id: 'pierce', name: '穿甲弹', max: 5,
+    desc: () => '子弹可额外穿透 1 个敌人',
+    icon: c => svg('<path d="M6 24h36"/><path d="M34 16l8 8-8 8"/><circle cx="18" cy="24" r="5"/>', c),
+    apply: p => { p.pierce += 1; }
+  },
+  {
+    id: 'hp', name: '装甲镀层', max: 99,
+    desc: () => '生命上限 +30，并立刻回满',
+    icon: c => svg('<path d="M24 6l14 5v12c0 10-6 15-14 19-8-4-14-9-14-19V11z"/><path d="M24 17v12M18 23h12"/>', c),
+    apply: p => { p.hpMax += 30; p.hp = p.hpMax; }
+  },
+  {
+    id: 'regen', name: '纳米修复', max: 6,
+    desc: () => '每秒回复 1.5 点生命',
+    icon: c => svg('<path d="M6 26h8l4-10 6 20 5-12 3 6h10"/>', c),
+    apply: p => { p.regen += 1.5; }
+  },
+  {
+    id: 'range', name: '锁定雷达', max: 5,
+    desc: () => '锁定与射程 +20%',
+    icon: c => svg('<circle cx="24" cy="24" r="16"/><circle cx="24" cy="24" r="8"/><circle cx="24" cy="24" r="2" fill="' + 'currentColor' + '"/><path d="M24 8v8M24 32v8M8 24h8M32 24h8"/>', c),
+    apply: p => { p.range *= 1.2; }
+  }
+];
+
+// 抽三张（排除已满级和不满足前置条件的）
+function rollUpgrades(p){
+  const pool = UPGRADES.filter(u => {
+    const taken = game.taken[p.index][u.id] || 0;
+    if (taken >= u.max) return false;
+    if (u.need && !u.need(p)) return false;
+    return true;
+  });
+  return sample(pool.length >= 3 ? pool : UPGRADES, 3);
+}
+
+/* ===================== 8. 状态机 / HUD / 主循环 ===================== */
+// 状态：menu（菜单）→ playing（战斗）→ upgrade（三选一）→ playing … → over（结算）
+const STATE = { MENU: 'menu', PLAYING: 'playing', UPGRADE: 'upgrade', OVER: 'over' };
+
+const game = {
+  state: STATE.MENU,
+  mode: 1,              // 1 或 2 人
+  wave: 1,
+  score: 0,
+  kills: 0,
+  time: 0,
+  spawnLeft: 0,         // 本波还没刷出来的数量
+  spawnTimer: 0,
+  cfg: waveConfig(1),
+  taken: [{}, {}],      // 每个玩家已取的升级计数
+  upQueue: [],          // 待选升级的玩家队列（双人时轮流选）
+  paused: false
+};
+
+const players = [ new Player(0, 0x36e0ff), new Player(1, 0xffa63d) ];
+
+/* ---------- HUD ---------- */
+const elPlayers = $('players');
+function buildHUDCards(){
+  elPlayers.innerHTML = '';
+  for (let i = 0; i < game.mode; i++){
+    const d = document.createElement('div');
+    d.className = 'pcard';
+    d.dataset.who = String(i + 1);
+    d.innerHTML =
+      '<span class="pname">玩家 ' + (i + 1) + '</span>' +
+      '<span class="pkeys">' + (i === 0 ? 'W A S D' : '↑ ← ↓ →') + '</span>' +
+      '<div class="bar"><i></i></div>' +
+      '<div class="pstat"></div>';
+    elPlayers.appendChild(d);
+  }
+}
+function updateHUD(){
+  $('hWave').textContent  = game.wave;
+  $('hLeft').textContent  = enemies.count + game.spawnLeft;
+  $('hScore').textContent = game.score;
+  $('hKill').textContent  = game.kills;
+  const cards = elPlayers.children;
+  for (let i = 0; i < cards.length; i++){
+    const p = players[i], c = cards[i];
+    c.dataset.dead = p.dead ? '1' : '0';
+    c.querySelector('.bar > i').style.width = (p.hp / p.hpMax * 100).toFixed(1) + '%';
+    c.querySelector('.pstat').textContent = p.dead
+      ? '阵亡'
+      : Math.ceil(p.hp) + '/' + Math.round(p.hpMax) + ' · 伤害 ' + p.dmg.toFixed(0) +
+        ' · 攻速 ' + p.rate.toFixed(1) + ' · 飞刀 ' + p.bladeCount;
+  }
+}
+
+let toastTimer = 0;
+function toast(msg){
+  $('toast').textContent = msg;
+  toastTimer = 2.2;
+}
+
+/* ---------- 界面切换 ---------- */
+function showScreen(name){
+  ['menu', 'upgrade', 'over'].forEach(id => $(id).classList.toggle('on', id === name));
+  $('hud').hidden = (name === 'menu');
+}
+
+/* ---------- 开始 / 重置 ---------- */
+function startGame(mode){
+  Sfx.resume();
+  game.mode = mode;
+  game.wave = 1; game.score = 0; game.kills = 0; game.time = 0;
+  game.taken = [{}, {}];
+  game.upQueue = [];
+  game.paused = false;
+  enemies.clear(); bullets.clear(); fx.clear();
+  players.forEach((p, i) => {
+    p.reset(i === 0 ? (mode === 1 ? 0 : -4) : 4);
+    p.mesh.visible = i < mode;
+    p.bladeGroup.visible = i < mode;
+    if (i >= mode){ p.dead = true; p.mesh.visible = false; }
+  });
+  camLook.set(0, 0, 0);
+  startWave(1);
+  buildHUDCards();
+  updateHUD();
+  game.state = STATE.PLAYING;
+  showScreen(null);
+}
+
+function startWave(w){
+  game.wave = w;
+  game.cfg = waveConfig(w);
+  game.spawnLeft = game.cfg.total;
+  game.spawnTimer = 0;
+  Sfx.wave();
+  toast('第 ' + w + ' 波 · 共 ' + game.cfg.total + ' 只');
+  updateHUD();
+}
+
+// 活着的玩家列表
+const livePlayers = () => players.slice(0, game.mode).filter(p => !p.dead);
+
+function checkWaveClear(){
+  if (game.state !== STATE.PLAYING) return;
+  if (game.spawnLeft > 0 || enemies.count > 0) return;
+  // 清空：所有活着的玩家依次选一张卡
+  game.upQueue = livePlayers().map(p => p.index);
+  if (game.upQueue.length === 0) return;   // 全死了由 checkDead 处理
+  game.state = STATE.UPGRADE;
+  showUpgrade();
+}
+
+function checkDead(){
+  if (game.state === STATE.OVER) return;
+  if (livePlayers().length > 0) return;
+  game.state = STATE.OVER;
+  $('oWave').textContent  = game.wave;
+  $('oScore').textContent = game.score;
+  $('oKill').textContent  = game.kills;
+  $('oTime').textContent  = fmtTime(game.time);
+  showScreen('over');
+}
+
+/* ---------- 升级界面 ---------- */
+let currentChoices = [];
+function showUpgrade(){
+  const idx = game.upQueue[0];
+  const p = players[idx];
+  currentChoices = rollUpgrades(p);
+  const color = idx === 0 ? '#36e0ff' : '#ffa63d';
+  $('upWave').textContent = '第 ' + game.wave + ' 波 清空 · 玩家 ' + (idx + 1) + ' 选择' +
+    (game.upQueue.length > 1 ? '（还有 ' + (game.upQueue.length - 1) + ' 人待选）' : '');
+  const box = $('cards');
+  box.innerHTML = '';
+  currentChoices.forEach((u, i) => {
+    const taken = game.taken[idx][u.id] || 0;
+    const btn = document.createElement('button');
+    btn.className = 'card';
+    btn.type = 'button';
+    btn.innerHTML = u.icon(color) +
+      '<b>' + u.name + '</b>' +
+      '<p>' + (typeof u.desc === 'function' ? u.desc(p) : u.desc) + '</p>' +
+      '<span class="num">[' + (i + 1) + ']' + (taken ? ' · 已有 ' + taken + ' 层' : '') + '</span>';
+    btn.addEventListener('click', () => choose(i));
+    box.appendChild(btn);
+  });
+  showScreen('upgrade');
+  // 自动聚焦首张卡，键盘可用
+  const first = box.firstElementChild;
+  if (first) first.focus();
+}
+
+function choose(i){
+  if (game.state !== STATE.UPGRADE) return;
+  const u = currentChoices[i];
+  if (!u) return;
+  const idx = game.upQueue.shift();
+  const p = players[idx];
+  u.apply(p);
+  game.taken[idx][u.id] = (game.taken[idx][u.id] || 0) + 1;
+  Sfx.pick();
+  if (game.upQueue.length > 0){
+    showUpgrade();                 // 下一个玩家继续选
+  } else {
+    showScreen(null);
+    game.state = STATE.PLAYING;
+    startWave(game.wave + 1);
+    updateHUD();
+  }
+}
+
+/* ---------- 按键总入口 ---------- */
+function onKey(code){
+  if (code === 'KeyR'){
+    if (game.state === STATE.MENU) return;
+    startGame(game.mode);
+    toast('已重置');
+    return;
+  }
+  if (game.state === STATE.MENU){
+    if (code === 'Digit1' || code === 'Enter') startGame(1);
+    if (code === 'Digit2') startGame(2);
+    return;
+  }
+  if (game.state === STATE.UPGRADE){
+    if (code === 'Digit1' || code === 'Numpad1') choose(0);
+    if (code === 'Digit2' || code === 'Numpad2') choose(1);
+    if (code === 'Digit3' || code === 'Numpad3') choose(2);
+    return;
+  }
+  if (game.state === STATE.PLAYING && (code === 'KeyP' || code === 'Escape')){
+    game.paused = !game.paused;
+    toast(game.paused ? '已暂停（P 继续）' : '继续');
+  }
+}
+
+$('btn1p').addEventListener('click', () => startGame(1));
+$('btn2p').addEventListener('click', () => startGame(2));
+$('btnAgain').addEventListener('click', () => startGame(game.mode));
+['btn1p', 'btn2p', 'btnAgain'].forEach(id => $(id).addEventListener('mouseenter', () => Sfx.ui()));
+
+/* ---------- 主循环 ---------- */
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  // dt 封顶，防止切后台回来后一帧跳太远
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  if (game.state === STATE.PLAYING && !game.paused){
+    game.time += dt;
+
+    // 按节奏刷怪
+    if (game.spawnLeft > 0){
+      game.spawnTimer -= dt;
+      while (game.spawnTimer <= 0 && game.spawnLeft > 0){
+        spawnEdge(game.cfg);
+        game.spawnLeft--;
+        game.spawnTimer += game.cfg.interval;
+      }
+      updateHUD();
+    }
+
+    const list = players.slice(0, game.mode);
+    list.forEach(p => p.update(dt));
+    enemies.update(dt, list);
+    bullets.update(dt);
+    checkWaveClear();
+    checkDead();
+  }
+  // 非战斗状态（菜单/升级/结算/暂停）不推进世界，但碎片特效继续收尾
+  fx.update(dt);
+
+  // —— 相机：跟随存活玩家的中心点，双人时按间距稍微拉远 ——
+  const live = livePlayers();
+  let tx = 0, tz = 0, spread = 0;
+  if (live.length){
+    live.forEach(p => { tx += p.pos.x; tz += p.pos.z; });
+    tx /= live.length; tz /= live.length;
+    if (live.length === 2) spread = live[0].pos.distanceTo(live[1].pos) * 0.35;
+  }
+  camLook.lerp(_v3.set(tx, 0, tz), 1 - Math.pow(0.0015, dt));
+  const zoom = 1 + clamp(spread / 30, 0, 0.5);
+  camera.position.set(
+    camLook.x + CAM_OFF.x * zoom,
+    CAM_OFF.y * zoom,
+    camLook.z + CAM_OFF.z * zoom
+  );
+  if (camShake > 0.001){
+    camera.position.x += rand(-1, 1) * camShake;
+    camera.position.z += rand(-1, 1) * camShake;
+    camShake *= Math.pow(0.02, dt);
+  }
+  camera.lookAt(camLook);
+
+  // 外圈光环呼吸
+  ring.material.opacity = 0.4 + Math.sin(performance.now() * 0.002) * 0.15;
+
+  // toast 淡出
+  if (toastTimer > 0){
+    toastTimer -= dt;
+    if (toastTimer <= 0) $('toast').textContent = '';
+  }
+
+  renderer.render(scene, camera);
+}
+
+// 初始化：实例矩阵默认是单位阵，必须先全部收起，否则菜单界面会在原点堆出一坨模型
+enemies.clear();
+bullets.clear();
+fx.clear();
+players.forEach(p => { p.mesh.visible = false; });
+buildHUDCards();
+animate();
+
+</script>
+</body>
+</html>
